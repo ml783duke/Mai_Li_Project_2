@@ -8,9 +8,19 @@ editor_options:
 ---
 
 ```{r setup, include=FALSE}
+# Set global knitr chunk options:
+# - echo = FALSE   → do not show R code in the final document
+# - message = FALSE → suppress package and other messages
+# - warning = FALSE → suppress warnings in the output
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+# Load tidyverse for data manipulation, wrangling, and plotting
 library(tidyverse)
+
+# Load lubridate for convenient date-time parsing and handling
 library(lubridate)
+
+# Load here to build file paths relative to the project root
 library(here)
 ```
 
@@ -28,19 +38,25 @@ variables, and combined them into a single dataset that includes one
 record per date.
 
 ```{r}
+# Clean a single yearly air quality file
 clean_aq <- function(path) {
+  # Read raw CSV
   raw <- read_csv(path, show_col_types = FALSE)
   
   cleaned <- raw %>%
+    # Rename pollutant columns to short variable names
     rename(
       co   = `Daily Max 8-hour CO Concentration`,
       pm25 = `Daily Mean PM2.5 Concentration`,
       o3   = `Daily Max 8-hour Ozone Concentration`
     ) %>%
+    # Parse date
     mutate(
       date = as.Date(Date, format = "%m/%d/%Y")
     ) %>%
+    # Keep only date and pollutant columns
     select(date, co, pm25, o3) %>%
+    # Aggregate to one row per day (average if multiple rows)
     group_by(date) %>%
     summarise(
       co   = mean(co,   na.rm = TRUE),
@@ -48,11 +64,13 @@ clean_aq <- function(path) {
       o3   = mean(o3,   na.rm = TRUE),
       .groups = "drop"
     ) %>%
+    # Set negative concentrations to zero
     mutate(
       co   = pmax(co,   0),
       pm25 = pmax(pm25, 0),
       o3   = pmax(o3,   0)
     ) %>%
+    # Remove any duplicate rows
     distinct()
   
   cleaned
@@ -60,15 +78,18 @@ clean_aq <- function(path) {
 ```
 
 ```{r}
+# Read and clean yearly data, then tag with year
 aq2018 <- clean_aq(here::here("data", "AQ_2018.csv")) %>% mutate(year = 2018)
 aq2019 <- clean_aq(here::here("data","AQ_2019.csv")) %>% mutate(year = 2019)
 aq2020 <- clean_aq(here::here("data","AQ_2020.csv")) %>% mutate(year = 2020)
 
+# Combine all years and add month variable
 aq_all <- bind_rows(aq2018, aq2019, aq2020) %>%
   mutate(
     month = month(date)
   )
 
+# Quick check of the combined dataset
 head(aq_all)
 ```
 
@@ -84,6 +105,7 @@ means, the overall seasonal trends for each pollutant are clear and
 highlight their contrasting temporal patterns.
 
 ```{r}
+# Monthly summary for CO and O3 (mean, SD, n, 95% CI)
 co_o3_monthly <- aq_all %>%
   group_by(month) %>%
   summarise(
@@ -106,6 +128,7 @@ co_o3_monthly <- aq_all %>%
     upr_o3 = mean_o3 + 1.96 * se_o3
   )
 
+# Reshape CO summary to long format
 co_long <- co_o3_monthly %>%
   transmute(
     month,
@@ -115,6 +138,7 @@ co_long <- co_o3_monthly %>%
     upr  = upr_co
   )
 
+# Reshape O3 summary to long format
 o3_long <- co_o3_monthly %>%
   transmute(
     month,
@@ -124,14 +148,17 @@ o3_long <- co_o3_monthly %>%
     upr  = upr_o3
   )
 
+# Combined dataset for plotting CO and O3 together
 plot1_data <- bind_rows(co_long, o3_long)
 ```
 
 ```{r}
+# Plot monthly mean CO and O3 with 95% CIs
 ggplot(plot1_data, aes(x = month, y = mean, color = pollutant)) +
-  geom_line() +
-  geom_point() +
-  geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0.2) +
+  geom_line() +                                 # lines for each pollutant
+  geom_point() +                                # points for monthly means
+  geom_errorbar(aes(ymin = lwr, ymax = upr),    # 95% CI error bars
+                width = 0.2) +
   labs(
     title = "Monthly mean CO and O3 concentrations (2018–2020 combined)",
     subtitle = "Points show monthly means; error bars show 95% confidence intervals",
@@ -139,7 +166,7 @@ ggplot(plot1_data, aes(x = month, y = mean, color = pollutant)) +
     y = "Average concentration",
     color = "Pollutant"
   ) +
-  theme_minimal()
+  theme_minimal()                               # clean minimal theme
 ```
 
 ### 3. Description for Plot 2 (PM2.5 by year)
@@ -152,6 +179,7 @@ overall PM2.5 levels across years, indicating year-to-year variation in
 air quality while maintaining the same general seasonal structure.
 
 ```{r}
+# Monthly average PM2.5 by year and month
 pm25_monthly <- aq_all %>%
   group_by(year, month) %>%
   summarise(
@@ -159,18 +187,20 @@ pm25_monthly <- aq_all %>%
     .groups = "drop"
   )
 
+# Quick check of the PM2.5 summary
 head(pm25_monthly)
 ```
 
 ```{r}
+# Plot monthly PM2.5 trends by year
 ggplot(pm25_monthly, aes(x = month, y = mean_pm25, color = factor(year))) +
-  geom_line() +
-  geom_point() +
+  geom_line() +                              # lines for each year
+  geom_point() +                             # points at monthly means
   labs(
     title = "Monthly PM2.5 trends by year",
     x = "Month",
     y = "Average PM2.5 concentration",
     color = "Year"
   ) +
-  theme_minimal()
+  theme_minimal()                            # clean minimal theme
 ```
