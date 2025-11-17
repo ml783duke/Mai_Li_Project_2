@@ -1,0 +1,176 @@
+---
+title: "Project_2"
+output: word_document
+date: "2025-11-17"
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(lubridate)
+library(here)
+```
+
+### 1. Data cleaning and preparation
+
+I first wrote a cleaning function to process the raw air quality data
+for each year. This function renames the pollutant concentration columns
+to short, meaningful variable names, converts the date variable to a
+proper Date format, and aggregates multiple records from the same
+calendar day into a single daily mean for CO, PM2.5, and O3. It also
+treats negative concentration values as measurement error by truncating
+them to zero and removes any remaining duplicate rows. I then applied
+this function to the 2018, 2019, and 2020 datasets, added year and month
+variables, and combined them into a single dataset that includes one
+record per date.
+
+```{r}
+clean_aq <- function(path) {
+  raw <- read_csv(path, show_col_types = FALSE)
+  
+  cleaned <- raw %>%
+    rename(
+      co   = `Daily Max 8-hour CO Concentration`,
+      pm25 = `Daily Mean PM2.5 Concentration`,
+      o3   = `Daily Max 8-hour Ozone Concentration`
+    ) %>%
+    mutate(
+      date = as.Date(Date, format = "%m/%d/%Y")
+    ) %>%
+    select(date, co, pm25, o3) %>%
+    group_by(date) %>%
+    summarise(
+      co   = mean(co,   na.rm = TRUE),
+      pm25 = mean(pm25, na.rm = TRUE),
+      o3   = mean(o3,   na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      co   = pmax(co,   0),
+      pm25 = pmax(pm25, 0),
+      o3   = pmax(o3,   0)
+    ) %>%
+    distinct()
+  
+  cleaned
+}
+```
+
+```{r}
+aq2018 <- clean_aq(here::here("data", "AQ_2018.csv")) %>% mutate(year = 2018)
+aq2019 <- clean_aq(here::here("data","AQ_2019.csv")) %>% mutate(year = 2019)
+aq2020 <- clean_aq(here::here("data","AQ_2020.csv")) %>% mutate(year = 2020)
+
+aq_all <- bind_rows(aq2018, aq2019, aq2020) %>%
+  mutate(
+    month = month(date)
+  )
+
+head(aq_all)
+```
+
+### 2. Description for Plot 1 (CO & O3 with 95% CIs)
+
+Figure 1 displays the monthly mean CO and O3 concentrations across
+2018–2020 combined, with 95% confidence intervals for each month. CO
+concentrations are generally higher in the winter months and lower in
+the summer, whereas O3 shows the opposite seasonal pattern, with peak
+concentrations in late spring and summer and the lowest values in
+winter. Although the error bars reflect uncertainty around the monthly
+means, the overall seasonal trends for each pollutant are clear and
+highlight their contrasting temporal patterns.
+
+```{r}
+co_o3_monthly <- aq_all %>%
+  group_by(month) %>%
+  summarise(
+    mean_co = mean(co, na.rm = TRUE),
+    sd_co   = sd(co,   na.rm = TRUE),
+    n_co    = sum(!is.na(co)),
+    
+    mean_o3 = mean(o3, na.rm = TRUE),
+    sd_o3   = sd(o3,   na.rm = TRUE),
+    n_o3    = sum(!is.na(o3)),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    se_co  = sd_co / sqrt(n_co),
+    lwr_co = mean_co - 1.96 * se_co,
+    upr_co = mean_co + 1.96 * se_co,
+    
+    se_o3  = sd_o3 / sqrt(n_o3),
+    lwr_o3 = mean_o3 - 1.96 * se_o3,
+    upr_o3 = mean_o3 + 1.96 * se_o3
+  )
+
+co_long <- co_o3_monthly %>%
+  transmute(
+    month,
+    pollutant = "CO",
+    mean = mean_co,
+    lwr  = lwr_co,
+    upr  = upr_co
+  )
+
+o3_long <- co_o3_monthly %>%
+  transmute(
+    month,
+    pollutant = "O3",
+    mean = mean_o3,
+    lwr  = lwr_o3,
+    upr  = upr_o3
+  )
+
+plot1_data <- bind_rows(co_long, o3_long)
+```
+
+```{r}
+ggplot(plot1_data, aes(x = month, y = mean, color = pollutant)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0.2) +
+  labs(
+    title = "Monthly mean CO and O3 concentrations (2018–2020 combined)",
+    subtitle = "Points show monthly means; error bars show 95% confidence intervals",
+    x = "Month",
+    y = "Average concentration",
+    color = "Pollutant"
+  ) +
+  theme_minimal()
+```
+
+### 3. Description for Plot 2 (PM2.5 by year)
+
+Figure 2 shows the monthly mean PM2.5 concentrations by year for 2018,
+2019, and 2020. All three years exhibit a similar seasonal pattern, with
+somewhat higher PM2.5 levels in winter and early spring and lower levels
+in the summer months. The lines also suggest modest differences in
+overall PM2.5 levels across years, indicating year-to-year variation in
+air quality while maintaining the same general seasonal structure.
+
+```{r}
+pm25_monthly <- aq_all %>%
+  group_by(year, month) %>%
+  summarise(
+    mean_pm25 = mean(pm25, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+head(pm25_monthly)
+```
+
+```{r}
+ggplot(pm25_monthly, aes(x = month, y = mean_pm25, color = factor(year))) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Monthly PM2.5 trends by year",
+    x = "Month",
+    y = "Average PM2.5 concentration",
+    color = "Year"
+  ) +
+  theme_minimal()
+```
