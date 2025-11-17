@@ -23,6 +23,8 @@ library(lubridate)
 # Load here to build file paths relative to the project root
 library(here)
 ```
+### Link to github
+https://github.com/ml783duke/Mai_Li_Project_2
 
 ### 1. Data cleaning and preparation
 
